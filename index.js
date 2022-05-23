@@ -4,9 +4,9 @@
 const $ = go.GraphObject.make;  // for conciseness in defining templates
 
 // some constants that will be reused within templates
-var mt8 = new go.Margin(8, 0, 0, 0);
-var mr8 = new go.Margin(0, 8, 0, 0);
-var ml8 = new go.Margin(0, 0, 0, 8);
+var mt8 = new go.Margin(15, 0, 0, 0);
+var mr8 = new go.Margin(0, 15, 0, 0);
+var ml8 = new go.Margin(0, 0, 0, 15);
 var roundedRectangleParams = {
   parameter1: 2,  // set the rounded corner
   spot1: go.Spot.TopLeft, spot2: go.Spot.BottomRight  // make content go all the way to inside edges of rounded corners
@@ -22,7 +22,7 @@ myDiagram =
         "clickCreatingTool.archetypeNodeData": { // allow double-click in background to create a new node
           name: "(new person)",
           title: "",
-          comments: ""
+          comments: "",
         },
         "clickCreatingTool.insertPart": function(loc) {  // override to scroll to the new node
           const node = go.ClickCreatingTool.prototype.insertPart.call(this, loc);
@@ -47,7 +47,7 @@ myDiagram =
               alternateAlignment: go.TreeLayout.AlignmentBus,
               alternateNodeSpacing: 20,
             }),
-        "undoManager.isEnabled": true, // enable undo & redo
+        // "undoManager.isEnabled": true, // enable undo & redo
         "draggingTool.isEnabled": false
       });
     
@@ -66,6 +66,7 @@ myDiagram =
   // define the Node template
   myDiagram.nodeTemplate =
     $(go.Node, "Auto",
+    
       {
         locationSpot: go.Spot.Top,
         isShadowed: true, shadowBlur: 2,
@@ -74,9 +75,8 @@ myDiagram =
         selectionAdornmentTemplate:  // selection adornment to match shape of nodes
           $(go.Adornment, "Auto",
             $(go.Shape, "RoundedRectangle", roundedRectangleParams,
-              { fill: null, stroke: "#7986cb", strokeWidth: 3 }
+              { fill: null, stroke: "#7986cb", strokeWidth: 3 },
             ),
-            
             $(go.Placeholder)
           )  // end Adornment
           
@@ -86,9 +86,22 @@ myDiagram =
         // gold if highlighted, white otherwise
         new go.Binding("fill", "isHighlighted", h => h ? "gold" : "#ffffff").ofObject()
       ),
+      // Hyperlink text 
+      // ===================
+    //   $("HyperlinkText",
+    //   function(node) { return "https://www.linkedin.com/" + node.data.version; },
+    //   function(node) { return "Visit GoJS " + node.data.version; },
+    //   { margin: 40, font: "16pt sans-serif", stroke: "red", }
+    // ),
+    // $("HyperlinkText",
+    // node => "https://www.linkedin.com/search/results/all/?keywords=" + encodeURIComponent(node.data.name),
+    // node => node.data.name,
+    // { textAlign: "bottom", stroke: "green", font: "16pt sans-serif", }
+    //   ),
+
       $(go.Panel, "Vertical",
         $(go.Panel, "Vertical",
-          { margin: 15 },
+          { margin: 40 },
           $(go.Panel, "Table",
             $(go.TextBlock,
               {
@@ -97,7 +110,6 @@ myDiagram =
                 stroke: "red",
                 maxSize: new go.Size(160, NaN)
               },
-              
               new go.Binding("text", "title")
             ),
               $(go.TextBlock, textStyle("Needed"),
@@ -138,9 +150,14 @@ myDiagram =
             stroke: "rgba(0, 0, 0, .60)", strokeWidth: 1,
             height: 1, stretch: go.GraphObject.Horizontal
           },
+
           new go.Binding("visible").ofObject("INFO")  // only visible when info is expanded
         ),
-
+        $("HyperlinkText",
+        node => "https://www.linkedin.com/search/results/all/?keywords=" + encodeURIComponent(node.data.name),
+        node => node.data.name,
+        { textAlign: "center", stroke: "green", font: "16pt sans-serif", margin: 20 }
+          ),
         $(go.Panel, "Vertical",
           {
             name: "INFO",  // identify to the PanelExpanderButton
@@ -167,17 +184,17 @@ myDiagram =
         $(go.TextBlock, textStyle("name"), { 
           margin: 2, stroke: "green", font:  "16pt sans-serif" 
         },
-        new go.Binding("text", "name", head => head + " A: mm/dd O: mm/dd")
+        new go.Binding("text", "releaseDate", head => head)
       ),
           $(go.TextBlock, textStyle("person2"), { 
             margin: 2, stroke: "purple", font:  "16pt sans-serif" 
           },
-          new go.Binding("text", "person2", head => head + " A: mm/dd O: mm/dd")
+          new go.Binding("text", "person2", head => head + " A: mm/dd D: mm/dd")
         ),
         $(go.TextBlock, textStyle("person3"), { 
           margin: 2, stroke: "blue", font:  "16pt sans-serif" 
         },
-        new go.Binding("text", "person3", head => head + " A: mm/dd O: mm/dd")
+        new go.Binding("text", "person3", head => head + " A: mm/dd D: mm/dd")
       ),
       // Button 2
     // ================================>
@@ -202,7 +219,6 @@ myDiagram =
         )
       )
     );
-
 
   // define a Link template that routes orthogonally, with no arrowhead
   myDiagram.linkTemplate =
