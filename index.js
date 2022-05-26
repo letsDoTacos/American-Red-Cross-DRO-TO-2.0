@@ -1,19 +1,10 @@
-// alert("Peanut Butter Jelly Time");
+function init() {
 
+  // Since 2.2 you can also author concise templates with method chaining instead of GraphObject.make
+  // For details, see https://gojs.net/latest/intro/buildingObjects.html
+  const $ = go.GraphObject.make;  // for conciseness in defining templates
 
-const $ = go.GraphObject.make;  // for conciseness in defining templates
-
-// some constants that will be reused within templates
-var mt8 = new go.Margin(15, 0, 0, 0);
-var mr8 = new go.Margin(0, 15, 0, 0);
-var ml8 = new go.Margin(0, 0, 0, 15);
-var roundedRectangleParams = {
-  parameter1: 2,  // set the rounded corner
-  spot1: go.Spot.TopLeft, spot2: go.Spot.BottomRight  // make content go all the way to inside edges of rounded corners
-};
-
-
-myDiagram =
+  myDiagram =
     $(go.Diagram, "myDiagramDiv", // must be the ID or reference to div
       {
         initialAutoScale: go.Diagram.Uniform,
@@ -22,7 +13,7 @@ myDiagram =
         "clickCreatingTool.archetypeNodeData": { // allow double-click in background to create a new node
           name: "(new person)",
           title: "",
-          comments: "",
+          comments: ""
         },
         "clickCreatingTool.insertPart": function(loc) {  // override to scroll to the new node
           const node = go.ClickCreatingTool.prototype.insertPart.call(this, loc);
@@ -45,356 +36,447 @@ myDiagram =
               alternateAngle: 90,
               alternateLayerSpacing: 35,
               alternateAlignment: go.TreeLayout.AlignmentBus,
-              alternateNodeSpacing: 20,
+              alternateNodeSpacing: 20
             }),
-        // "undoManager.isEnabled": true, // enable undo & redo
-        "draggingTool.isEnabled": false
+        "undoManager.isEnabled": true // enable undo & redo
       });
-    
+
+  // when the document is modified, add a "*" to the title and enable the "Save" button
+  myDiagram.addDiagramListener("Modified", e => {
+    const button = document.getElementById("SaveButton");
+    if (button) button.disabled = !myDiagram.isModified;
+    const idx = document.title.indexOf("*");
+    if (myDiagram.isModified) {
+      if (idx < 0) document.title += "*";
+    } else {
+      if (idx >= 0) document.title = document.title.slice(0, idx);
+    }
+  });
+
+  // manage boss info manually when a node or link is deleted from the diagram
+  myDiagram.addDiagramListener("SelectionDeleting", e => {
+    const part = e.subject.first(); // e.subject is the myDiagram.selection collection,
+    // so we'll get the first since we know we only have one selection
+    myDiagram.startTransaction("clear boss");
+    if (part instanceof go.Node) {
+      const it = part.findTreeChildrenNodes(); // find all child nodes
+      while (it.next()) { // now iterate through them and clear out the boss information
+        const child = it.value;
+        const bossText = child.findObject("boss"); // since the boss TextBlock is named, we can access it by name
+        if (bossText === null) return;
+        bossText.text = "";
+      }
+    } else if (part instanceof go.Link) {
+      const child = part.toNode;
+      const bossText = child.findObject("boss"); // since the boss TextBlock is named, we can access it by name
+      if (bossText === null) return;
+      bossText.text = "";
+    }
+    myDiagram.commitTransaction("clear boss");
+  });
+
+  const levelColors = ["#AC193D", "#2672EC", "#8C0095", "#5133AB",
+    "#008299", "#D24726", "#008A00", "#094AB2"];
+
+  // override TreeLayout.commitNodes to also modify the background brush based on the tree depth level
+  myDiagram.layout.commitNodes = function() {
+    go.TreeLayout.prototype.commitNodes.call(this);  // do the standard behavior
+    // then go through all of the vertexes and set their corresponding node's Shape.fill
+    // to a brush dependent on the TreeVertex.level value
+    myDiagram.layout.network.vertexes.each(v => {
+      if (v.node) {
+        const level = v.level % (levelColors.length);
+        const color = levelColors[level];
+        const shape = v.node.findObject("SHAPE");
+        if (shape) shape.fill = $(go.Brush, "Linear", { 0: color, 1: go.Brush.lightenBy(color, 0.05), start: go.Spot.Left, end: go.Spot.Right });
+      }
+    });
+  };
+
+  // when a node is double-clicked, add a child to it
+  function nodeDoubleClick(e, obj) {
+    const clicked = obj.part;
+    if (clicked !== null) {
+      const thisemp = clicked.data;
+      myDiagram.startTransaction("add employee");
+      const newemp = {
+        name: "(new person)",
+        title: "",
+        comments: "",
+        parent: thisemp.key
+      };
+      myDiagram.model.addNodeData(newemp);
+      myDiagram.commitTransaction("add employee");
+    }
+  }
+
+  // this is used to determine feedback during drags
+  function mayWorkFor(node1, node2) {
+    if (!(node1 instanceof go.Node)) return false;  // must be a Node
+    if (node1 === node2) return false;  // cannot work for yourself
+    if (node2.isInTreeOf(node1)) return false;  // cannot work for someone who works for you
+    return true;
+  }
+
   // This function provides a common style for most of the TextBlocks.
   // Some of these values may be overridden in a particular TextBlock.
-  function textStyle(field) {
-    return [
-      {
-        font: "16pt sans-serif", stroke: "black",  
-        visible: false  // only show textblocks when there is corresponding data for them
-      },
-      new go.Binding("visible", field, val => val !== undefined),
-    ];
+  function textStyle() {
+    return { font: "9pt  Segoe UI,sans-serif", stroke: "white" };
+  }
+
+  // This converter is used by the Picture.
+  function findHeadShot(key) {
+    if (key < 0 || key > 16) return "images/HSnopic.png"; // There are only 16 images on the server
+    return "images/HS" + key + ".png"
   }
 
   // define the Node template
   myDiagram.nodeTemplate =
     $(go.Node, "Auto",
-    
-      {
-        locationSpot: go.Spot.Top,
-        isShadowed: true, shadowBlur: 2,
-        shadowOffset: new go.Point(0, 2),
-        shadowColor: "rgba(0, 0, 0, .25)",
-        selectionAdornmentTemplate:  // selection adornment to match shape of nodes
-          $(go.Adornment, "Auto",
-            $(go.Shape, "RoundedRectangle", roundedRectangleParams,
-              { fill: null, stroke: "#7986cb", strokeWidth: 3 },
-            ),
-            $(go.Placeholder)
-          )  // end Adornment
-          
+      { doubleClick: nodeDoubleClick },
+      { // handle dragging a Node onto a Node to (maybe) change the reporting relationship
+        mouseDragEnter: (e, node, prev) => {
+          const diagram = node.diagram;
+          const selnode = diagram.selection.first();
+          if (!mayWorkFor(selnode, node)) return;
+          const shape = node.findObject("SHAPE");
+          if (shape) {
+            shape._prevFill = shape.fill;  // remember the original brush
+            shape.fill = "darkred";
+          }
+        },
+        mouseDragLeave: (e, node, next) => {
+          const shape = node.findObject("SHAPE");
+          if (shape && shape._prevFill) {
+            shape.fill = shape._prevFill;  // restore the original brush
+          }
+        },
+        mouseDrop: (e, node) => {
+          const diagram = node.diagram;
+          const selnode = diagram.selection.first();  // assume just one Node in selection
+          if (mayWorkFor(selnode, node)) {
+            // find any existing link into the selected node
+            const link = selnode.findTreeParentLink();
+            if (link !== null) {  // reconnect any existing link
+              link.fromNode = node;
+            } else {  // else create a new link
+              diagram.toolManager.linkingTool.insertLink(node, node.port, selnode, selnode.port);
+            }
+          }
+        }
       },
-      $(go.Shape, "RoundedRectangle", roundedRectangleParams,
-        { margin: 8, name: "SHAPE", fill: "#ffffff", strokeWidth: 0 },
-        // gold if highlighted, white otherwise
-        new go.Binding("fill", "isHighlighted", h => h ? "gold" : "#ffffff").ofObject()
-      ),
-      // Hyperlink text 
-      // ===================
-    //   $("HyperlinkText",
-    //   function(node) { return "https://www.linkedin.com/" + node.data.version; },
-    //   function(node) { return "Visit GoJS " + node.data.version; },
-    //   { margin: 40, font: "16pt sans-serif", stroke: "red", }
-    // ),
-    // $("HyperlinkText",
-    // node => "https://www.linkedin.com/search/results/all/?keywords=" + encodeURIComponent(node.data.name),
-    // node => node.data.name,
-    // { textAlign: "bottom", stroke: "green", font: "16pt sans-serif", }
-    //   ),
-
-      $(go.Panel, "Vertical",
-        $(go.Panel, "Vertical",
-          { margin: 40 },
-          $(go.Panel, "Table",
-            $(go.TextBlock,
-              {
-                row: 0, alignment: go.Spot.Center,
-                font: "16pt sans-serif",
-                stroke: "red",
-                maxSize: new go.Size(160, NaN)
-              },
-              new go.Binding("text", "title")
-            ),
-              $(go.TextBlock, textStyle("Needed"),
-            {
-              row: 1, alignment: go.Spot.Center,
-              maxSize: new go.Size(160, NaN)
-            },
-              new go.Binding("text", "Needed", head => "Needed: " + head)
-
-          ),  
-      // Button 1
-    // ================================> 
-      $("Button",
-      {
-        margin: 2, row: 2,
-        // set properties on the border Shape of the "Button"
-        "ButtonBorder.figure": "RoundedRectangle",
-        "ButtonBorder.fill": "red",
-        "ButtonBorder.stroke": "black",
-        "ButtonBorder.strokeWidth": 3,
-        // set properties on the "Button" itself used by its event handlers
-        "_buttonFillOver": "Green",
-        "_buttonStrokeOver": "black",
-        "_buttonFillPressed": "lightgray",
-        // link
-        // ================================> 
-        click: function(e, button) { window.open("https://arcstage.tcheetah.com/?nd=m_home") }
-        },
-      $(go.TextBlock, "Disable / Enable Assignment", { margin: 2, stroke: "White", font:  "16pt sans-serif" })
-      ),
-      $("PanelExpanderButton", "INFO",
-        { row: 0, column: 1, rowSpan: 2, margin: ml8 }
-        )
-        )
-        ),
-        $(go.Shape, "LineH",
-          {
-            stroke: "rgba(0, 0, 0, .60)", strokeWidth: 1,
-            height: 1, stretch: go.GraphObject.Horizontal
-          },
-
-          new go.Binding("visible").ofObject("INFO")  // only visible when info is expanded
-        ),
-        $("HyperlinkText",
-        node => "https://www.linkedin.com/search/results/all/?keywords=" + encodeURIComponent(node.data.name),
-        node => node.data.name,
-        { textAlign: "center", stroke: "green", font: "16pt sans-serif", margin: 20 }
-          ),
-        $(go.Panel, "Vertical",
-          {
-            name: "INFO",  // identify to the PanelExpanderButton
-            stretch: go.GraphObject.Horizontal,  // take up whole available width
-            margin: 8,
-            defaultAlignment: go.Spot.Center,  // thus no need to specify alignment on each element
-          },
-
-           // ================================>
-          // Adding test text here
-        //  $(go.TextBlock, textStyle("name"),
-        //   new go.Binding("text", "name", head => head)
-        // ),
-        // $(go.TextBlock, textStyle("releaseDate"),
-        // new go.Binding("text", "releaseDate", head => "Release date: " + head)
-        // ),
-        //     $(go.TextBlock, textStyle("daysOnJob"),
-        //     new go.Binding("text", "daysOnJob", head => "DOJ: " + head)
-        //   ),
-        //   $(go.TextBlock, textStyle("location"),
-        //   new go.Binding("text", "location", head => "Location: " + head)
-        // ),
-        // in/out notes
-        $(go.TextBlock, textStyle("name"), { 
-          margin: 2, stroke: "green", font:  "16pt sans-serif" 
-        },
-        new go.Binding("text", "releaseDate", head => head)
-      ),
-          $(go.TextBlock, textStyle("person2"), { 
-            margin: 2, stroke: "purple", font:  "16pt sans-serif" 
-          },
-          new go.Binding("text", "person2", head => head + " A: mm/dd D: mm/dd")
-        ),
-        $(go.TextBlock, textStyle("person3"), { 
-          margin: 2, stroke: "blue", font:  "16pt sans-serif" 
-        },
-        new go.Binding("text", "person3", head => head + " A: mm/dd D: mm/dd")
-      ),
-      // Button 2
-    // ================================>
-    $("Button",
+      // for sorting, have the Node.text be the data.name
+      new go.Binding("text", "name"),
+      // bind the Part.layerName to control the Node's layer depending on whether it isSelected
+      new go.Binding("layerName", "isSelected", sel => sel ? "Foreground" : "").ofObject(),
+      // define the node's outer shape
+      $(go.Shape, "Rectangle",
         {
-          margin: 2,
-          // set properties on the border Shape of the "Button"
-          "ButtonBorder.figure": "RoundedRectangle",
-          "ButtonBorder.fill": "red",
-          "ButtonBorder.stroke": "black",
-          "ButtonBorder.strokeWidth": 3,
-          // set properties on the "Button" itself used by its event handlers
-          "_buttonFillOver": "Green",
-          "_buttonStrokeOver": "black",
-          "_buttonFillPressed": "lightgray",
-        // link  
-        // ================================>
-          click: function(e, button) { window.open("https://www.digitalcheetah.com") }
-        },
-        $(go.TextBlock, "Open Staffing Request", { margin: 2, textAlign: "center", stroke: "White", font: "16pt sans-serif" })
+          name: "SHAPE", fill: "white", stroke: null,
+          // set the port properties:
+          portId: "", fromLinkable: true, toLinkable: true, cursor: "pointer"
+        }),
+      $(go.Panel, "Horizontal",
+        $(go.Picture,
+          {
+            name: "Picture",
+            desiredSize: new go.Size(39, 50),
+            margin: new go.Margin(6, 8, 6, 10),
+          },
+          new go.Binding("source", "key", findHeadShot)),
+        // define the panel where the text will appear
+        $(go.Panel, "Table",
+          {
+            maxSize: new go.Size(150, 999),
+            margin: new go.Margin(6, 10, 0, 3),
+            defaultAlignment: go.Spot.Left
+          },
+          $(go.RowColumnDefinition, { column: 2, width: 4 }),
+          $(go.TextBlock, textStyle(),  // the name
+            {
+              name: "NAMETB",
+              row: 0, column: 0, columnSpan: 5,
+              font: "12pt Segoe UI,sans-serif",
+              editable: true, isMultiline: false,
+              minSize: new go.Size(10, 16)
+            },
+            new go.Binding("text", "name").makeTwoWay()),
+          $(go.TextBlock, "Title: ", textStyle(),
+            { row: 1, column: 0 }),
+          $(go.TextBlock, textStyle(),
+            {
+              row: 1, column: 1, columnSpan: 4,
+              editable: true, isMultiline: false,
+              minSize: new go.Size(10, 14),
+              margin: new go.Margin(0, 0, 0, 3)
+            },
+            new go.Binding("text", "title").makeTwoWay()),
+          $(go.TextBlock, textStyle(),
+            { row: 2, column: 0 },
+            new go.Binding("text", "key", v => "ID: " + v)),
+          $(go.TextBlock, textStyle(),
+            { name: "boss", row: 2, column: 3, }, // we include a name so we can access this TextBlock when deleting Nodes/Links
+            new go.Binding("text", "parent", v => "Boss: " + v)),
+          $(go.TextBlock, textStyle(),  // the comments
+            {
+              row: 3, column: 0, columnSpan: 5,
+              font: "italic 9pt sans-serif",
+              wrap: go.TextBlock.WrapFit,
+              editable: true,  // by default newlines are allowed
+              minSize: new go.Size(10, 14)
+            },
+            new go.Binding("text", "comments").makeTwoWay())
+        )  // end Table Panel
+      ) // end Horizontal Panel
+    );  // end Node
+
+  // the context menu allows users to make a position vacant,
+  // remove a role and reassign the subtree, or remove a department
+  myDiagram.nodeTemplate.contextMenu =
+    $("ContextMenu",
+      $("ContextMenuButton",
+        $(go.TextBlock, "Vacate Position"),
+        {
+          click: (e, obj) => {
+            const node = obj.part.adornedPart;
+            if (node !== null) {
+              const thisemp = node.data;
+              myDiagram.startTransaction("vacate");
+              // update the key, name, and comments
+              myDiagram.model.setDataProperty(thisemp, "name", "(Vacant)");
+              myDiagram.model.setDataProperty(thisemp, "comments", "");
+              myDiagram.commitTransaction("vacate");
+            }
+          }
+        }
       ),
-        )
+      $("ContextMenuButton",
+        $(go.TextBlock, "Remove Role"),
+        {
+          click: (e, obj) => {
+            // reparent the subtree to this node's boss, then remove the node
+            const node = obj.part.adornedPart;
+            if (node !== null) {
+              myDiagram.startTransaction("reparent remove");
+              const chl = node.findTreeChildrenNodes();
+              // iterate through the children and set their parent key to our selected node's parent key
+              while (chl.next()) {
+                const emp = chl.value;
+                myDiagram.model.setParentKeyForNodeData(emp.data, node.findTreeParentNode().data.key);
+              }
+              // and now remove the selected node itself
+              myDiagram.model.removeNodeData(node.data);
+              myDiagram.commitTransaction("reparent remove");
+            }
+          }
+        }
+      ),
+      $("ContextMenuButton",
+        $(go.TextBlock, "Remove Department"),
+        {
+          click: (e, obj) => {
+            // remove the whole subtree, including the node itself
+            const node = obj.part.adornedPart;
+            if (node !== null) {
+              myDiagram.startTransaction("remove dept");
+              myDiagram.removeParts(node.findTreeParts());
+              myDiagram.commitTransaction("remove dept");
+            }
+          }
+        }
+      ),
+      $("ContextMenuButton",
+        $(go.TextBlock, "Toggle Assistant"),
+        {
+          click: (e, obj) => {
+            // remove the whole subtree, including the node itself
+            const node = obj.part.adornedPart;
+            if (node !== null) {
+              myDiagram.startTransaction("toggle assistant");
+              myDiagram.model.setDataProperty(node.data, "isAssistant", !node.data.isAssistant);
+              myDiagram.layout.invalidateLayout();
+              myDiagram.commitTransaction("toggle assistant");
+            }
+          }
+        }
       )
     );
 
-  // define a Link template that routes orthogonally, with no arrowhead
+  // define the Link template
   myDiagram.linkTemplate =
-    new go.Link(
-      // default routing is go.Link.Normal
-      // default corner is 0
-      { routing: go.Link.Orthogonal, corner: 5 })
-      // the link path, a Shape
-      .add(new go.Shape({ strokeWidth: 3, stroke: "#555" }))
-      // if we wanted an arrowhead we would also add another Shape with toArrow defined:
-      // .add(new go.Shape({  toArrow: "Standard", stroke: null  }))
+    $(go.Link, go.Link.Orthogonal,
+      { corner: 5, relinkableFrom: true, relinkableTo: true },
+      $(go.Shape, { strokeWidth: 4, stroke: "#00a4a4" }));  // the link shape
+
+  // read in the JSON-format data from the "mySavedModel" element
+  load();
 
 
-    // Notes for injecting data arrays
-      // nodeDataArray > http://gojs.net/latest/api/symbols/Model.html#addNodeData
-      // addNodeData > http://gojs.net/latest/api/symbols/Model.html#addNodeData
-      // reomoveNodeData > http://gojs.net/latest/api/symbols/Model.html#removeNodeDat
-
-  // it's best to declare all templates before assigning the model
-  myDiagram.model = new go.TreeModel(
-    [
-      { key: "0", parent:"", name: "Charles Blake", title: "RCCO Director", Needed: "1 - 2", person1: "Dave Gutierrez", person2: "Kay Murphy", staffReq: "Open Staff Request " },
-      { key: "1", parent:"1", name: "Dave Gutierrez", title: "DRO Director", Needed: "1 - 2", disEna: "", releaseDate: "5/27/2022", daysOnJob: "1", location: "HQ" },
-      { key: "2", parent:"1", name: "Kay Murphy", title: "Chief of Staff", Needed: "3 - 4", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "HQ" },
-      { key: "3", parent:"1", name: "Emily Camp", title: "Deputy Director", Needed: "8 - 10", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "HQ" },
-      { key: "4", parent:"3", name: "Kay Wilkins", title: "EOLN Lead", Needed: "3 - 7", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Operations" },
-      { key: "5", parent: "2", name: "Kevin White", title: "AD Operations", Needed: "100 - 144", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Operations" },
-      { key: "6", parent: "2", name: "Peter Grey", title: "AD Planning", Needed: "30 - 44", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Warehouse" },
-      { key: "7", parent: "2", name: "Barbara Riester", title: "AD Logistics", Needed: "10 - 17", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Operations" },
-      { key: "8", parent: "2", name: "Judy Blair", title: "AD Finance", Needed: "1 - 3", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Field" },
-      { key: "9", parent: "2", name: "Sandi Wraith", title: "AD Workforce", Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Field" },
-      { key: "10", parent: "6", name: "Cortney Shatraw", title: "Disaster Assessment Manager", Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" }, 
-      { key: "11", parent: "5", name: "-central", title: "Itinerating DAD Response",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "12", parent: "5", name: "-north", title: "Itinerating DAD Response",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "13", parent: "5", name: "-sw", title: "Itinerating DAD Response",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "14", parent: "5", name: "Gail Snieder", title: "Disability Integration Chief",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "15", parent: "7", name: "RObert English", title: "Warehousing Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "16", parent: "6", name: "Rob Thomas", title: "Situation Unit Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "17", parent: "6", name: "Alyson GOrdon", title: "Documentation Unit Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "18", parent: "6", name: "Louise Grantt", title: "FSI Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "19", parent: "7", name: "Doug Brown", title: "Logistics Lead",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "20", parent: "7", name: "Tammy Easter", title: "Supply Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "21", parent: "7", name: "Harry Feirman", title: "Transportation Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "22", parent: "8", name: "Tera Bess", title: "LCV Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "23", parent: "8", name: "Brenda Hewlett", title: "Training Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "24", parent: "8", name: "Lou Kennedy", title: "Staff Relations",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "25", parent: "8", name: "Nicole Harris", title: "EBV Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "26", parent: "8", name: "Jodi Tolliver", title: "SPS Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "27", parent: "8", name: "Gwen Hillard", title: "Staff Lodging",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "28", parent: "9", name: "Jermaine Smith", title: "Fundraising Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "29", parent: "9", name: "Jerry George", title: "Government Operations Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", DOJ: "1", location: "Conventions Center" },
-      { key: "30", parent: "9", name: "..", title: "Public Affairs Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-      { key: "31", parent: "9", name: "Kamalah Harris", title: "CEP Manager",  Needed: "1 - 2", disEna: "",  person2: "person2" , person3: "person3", person4: "person4", releaseDate: "5/27/2022", daysOnJob: "1", location: "Conventions Center" },
-    ]
-    );
-
-  // center and search features 
-       // Setup zoom to fit button
-       document.getElementById('zoomToFit').addEventListener('click', () => myDiagram.commandHandler.zoomToFit());
-
-       document.getElementById('centerRoot').addEventListener('click', () => {
-         myDiagram.scale = 1;
-         myDiagram.commandHandler.scrollToPart(myDiagram.findNodeForKey(1));
-       });
-
-           // the Search functionality highlights all of the nodes that have at least one data property match a RegExp
-    function searchDiagram() {  // called by button
-      var input = document.getElementById("mySearch");
-      if (!input) return;
-      myDiagram.focus();
-
-      myDiagram.startTransaction("highlight search");
-
-      if (input.value) {
-        // search four different data properties for the string, any of which may match for success
-        // create a case insensitive RegExp from what the user typed
-        var safe = input.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        var regex = new RegExp(safe, "i");
-        var results = myDiagram.findNodesByExample({ name: regex },
-          // { nation: regex },
-          { title: regex },
-          { headOf: regex });
-        myDiagram.highlightCollection(results);
-        // try to center the diagram at the first node that was found
-        if (results.count > 0) myDiagram.centerRect(results.first().actualBounds);
-      } else {  // empty string only clears highlighteds collection
-        myDiagram.clearHighlighteds();
+  // support editing the properties of the selected person in HTML
+  if (window.Inspector) myInspector = new Inspector("myInspector", myDiagram,
+    {
+      properties: {
+        "key": { readOnly: true },
+        "comments": {},
+        "isAssistant": { type: "boolean" }
+      },
+      propertyModified: (name, val) => {
+        if (name === "isAssistant") myDiagram.layout.invalidateLayout();
       }
+    });
+}
 
-      myDiagram.commitTransaction("highlight search");
+
+// Assume that the SideTreeLayout determines whether a node is an "assistant" if a particular data property is true.
+// You can adapt this code to decide according to your app's needs.
+function isAssistant(n) {
+  if (n === null) return false;
+  return n.data.isAssistant;
+}
 
 
+// This is a custom TreeLayout that knows about "assistants".
+// A Node for which isAssistant(n) is true will be placed at the side below the parent node
+// but above all of the other child nodes.
+// An assistant node may be the root of its own subtree.
+// An assistant node may have its own assistant nodes.
+class SideTreeLayout extends go.TreeLayout {
+makeNetwork(coll) {
+  const net = super.makeNetwork(coll);
+  // copy the collection of TreeVertexes, because we will modify the network
+  const vertexcoll = new go.Set(/*go.TreeVertex*/);
+  vertexcoll.addAll(net.vertexes);
+  for (const it = vertexcoll.iterator; it.next();) {
+    const parent = it.value;
+    // count the number of assistants
+    let acount = 0;
+    const ait = parent.destinationVertexes;
+    while (ait.next()) {
+      if (isAssistant(ait.value.node)) acount++;
+    }
+    // if a vertex has some number of children that should be assistants
+    if (acount > 0) {
+      // remember the assistant edges and the regular child edges
+      const asstedges = new go.Set(/*go.TreeEdge*/);
+      const childedges = new go.Set(/*go.TreeEdge*/);
+      let eit = parent.destinationEdges;
+      while (eit.next()) {
+        const e = eit.value;
+        if (isAssistant(e.toVertex.node)) {
+          asstedges.add(e);
+        } else {
+          childedges.add(e);
+        }
+      }
+      // first remove all edges from PARENT
+      eit = asstedges.iterator;
+      while (eit.next()) { parent.deleteDestinationEdge(eit.value); }
+      eit = childedges.iterator;
+      while (eit.next()) { parent.deleteDestinationEdge(eit.value); }
+      // if the number of assistants is odd, add a dummy assistant, to make the count even
+      if (acount % 2 == 1) {
+        const dummy = net.createVertex();
+        net.addVertex(dummy);
+        net.linkVertexes(parent, dummy, asstedges.first().link);
+      }
+      // now PARENT should get all of the assistant children
+      eit = asstedges.iterator;
+      while (eit.next()) {
+        parent.addDestinationEdge(eit.value);
+      }
+      // create substitute vertex to be new parent of all regular children
+      const subst = net.createVertex();
+      net.addVertex(subst);
+      // reparent regular children to the new substitute vertex
+      eit = childedges.iterator;
+      while (eit.next()) {
+        const ce = eit.value;
+        ce.fromVertex = subst;
+        subst.addDestinationEdge(ce);
+      }
+      // finally can add substitute vertex as the final odd child,
+      // to be positioned at the end of the PARENT's immediate subtree.
+      const newedge = net.linkVertexes(parent, subst, null);
+    }
+  }
+  return net;
 };
 
-    // // Show the diagram's model in JSON format
-    // function save() {
-    //   document.getElementById("mySavedModel").value = myDiagram.model.toJson();
-    //   myDiagram.isModified = false;
-    // }
-    // function load() {
-    //   myDiagram.model = go.Model.fromJson(document.getElementById("mySavedModel").value);
-    //   // make sure new data keys are unique positive integers
-    //   let lastkey = 1;
-    //   myDiagram.model.makeUniqueKeyFunction = (model, data) => {
-    //     let k = data.key || lastkey;
-    //     while (model.findNodeDataForKey(k)) k++;
-    //     data.key = lastkey = k;
-    //     return k;
-    //   };
-    // }
+assignTreeVertexValues(v) {
+  // if a vertex has any assistants, use Bus alignment
+  let any = false;
+  const children = v.children;
+  for (let i = 0; i < children.length; i++) {
+    const c = children[i];
+    if (isAssistant(c.node)) {
+      any = true;
+      break;
+    }
+  }
+  if (any) {
+    // this is the parent for the assistant(s)
+    v.alignment = go.TreeLayout.AlignmentBus;  // this is required
+    v.nodeSpacing = 50; // control the distance of the assistants from the parent's main links
+  } else if (v.node == null && v.childrenCount > 0) {
+    // found the substitute parent for non-assistant children
+    //v.alignment = go.TreeLayout.AlignmentCenterChildren;
+    //v.breadthLimit = 3000;
+    v.layerSpacing = 0;
+  }
+};
 
-    // ===========================================
-        // Show the diagram's model in JSON format
-            // ===========================================
-
-    // function save() {
-    //   document.getElementById("mySavedModel").value = myDiagram.model.toJson();
-    //   myDiagram.isModified = false;
-    // }
-    // function load() {
-    //   myDiagram.model = go.Model.fromJson(document.getElementById("mySavedModel").value);
-    //   // make sure new data keys are unique positive integers
-    //   let lastkey = 1;
-    //   myDiagram.model.makeUniqueKeyFunction = (model, data) => {
-    //     let k = data.key || lastkey;
-    //     while (model.findNodeDataForKey(k)) k++;
-    //     data.key = lastkey = k;
-    //     return k;
-    //   };
-    // }
-
-
-    // ============================================>
-    // PRINT FUNCTION ***Currently not*** working
-    // ============================================>
-
- // if width or height are below 50, they are set to 50
-function generateImages(width, height) {
-  // sanitize input
-  width = parseInt(width);
-  height = parseInt(height);
-  if (isNaN(width)) width = 100;
-  if (isNaN(height)) height = 100;
-  // Give a minimum size of 50x50
-  width = Math.max(width, 50);
-  height = Math.max(height, 50);
-// update from getElementById
-  var imgDiv = document.querySelectorAll ('myImages'); 
-  imgDiv.innerHTML = ''; // clear out the old images, if any
-  var db = myDiagram.documentBounds;
-  var boundswidth = db.width;
-  var boundsheight = db.height;
-  var imgWidth = width;
-  var imgHeight = height;
-  var p = db.position;
-  for (var i = 0; i < boundsheight; i += imgHeight) {
-    for (var j = 0; j < boundswidth; j += imgWidth) {
-      var img = myDiagram.makeImage({
-        scale: 1,
-        position: new go.Point(p.x + j, p.y + i),
-        size: new go.Size(imgWidth, imgHeight)
-      });
-      // Append the new HTMLImageElement to the #myImages div
-      img.className = 'images';
-      imgDiv.appendChild(img);
-      imgDiv.appendChild(document.createElement('br'));
+commitLinks() {
+  super.commitLinks();
+  // make sure the middle segment of an orthogonal link does not cross over the assistant subtree
+  const eit = this.network.edges.iterator;
+  while (eit.next()) {
+    const e = eit.value;
+    if (e.link == null) continue;
+    const r = e.link;
+    // does this edge come from a substitute parent vertex?
+    const subst = e.fromVertex;
+    if (subst.node == null && r.routing == go.Link.Orthogonal) {
+      r.updateRoute();
+      r.startRoute();
+      // middle segment goes from point 2 to point 3
+      const p1 = subst.center;  // assume artificial vertex has zero size
+      const p2 = r.getPoint(2).copy();
+      const p3 = r.getPoint(3).copy();
+      const p5 = r.getPoint(r.pointsCount - 1);
+      let dist = 10;
+      if (subst.angle == 270 || subst.angle == 180) dist = -20;
+      if (subst.angle == 90 || subst.angle == 270) {
+        p2.y = p5.y - dist; // (p1.y+p5.y)/2;
+        p3.y = p5.y - dist; // (p1.y+p5.y)/2;
+      } else {
+        p2.x = p5.x - dist; // (p1.x+p5.x)/2;
+        p3.x = p5.x - dist; // (p1.x+p5.x)/2;
+      }
+      r.setPoint(2, p2);
+      r.setPoint(3, p3);
+      r.commitRoute();
     }
   }
 }
+}
+// end of SideTreeLayout
 
-var button = document.getElementById('makeImages');
-button.addEventListener('click', function() {
-  var width = parseInt(document.getElementById('widthInput').value);
-  var height = parseInt(document.getElementById('heightInput').value);
-  generateImages(width, height);
-}, false);
 
-// Call it with some default values
-generateImages(700, 960);
+// Show the diagram's model in JSON format
+function save() {
+  document.getElementById("mySavedModel").value = myDiagram.model.toJson();
+  myDiagram.isModified = false;
+}
+function load() {
+  myDiagram.model = go.Model.fromJson(document.getElementById("mySavedModel").value);
+  // make sure new data keys are unique positive integers
+  let lastkey = 1;
+  myDiagram.model.makeUniqueKeyFunction = (model, data) => {
+    let k = data.key || lastkey;
+    while (model.findNodeDataForKey(k)) k++;
+    data.key = lastkey = k;
+    return k;
+  };
+}
+
+window.addEventListener('DOMContentLoaded', init);
